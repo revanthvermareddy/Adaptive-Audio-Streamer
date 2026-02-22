@@ -1,0 +1,5 @@
+# Audio source files — one path per line (absolute or relative)
+# Lines starting with # are comments. Blank lines are ignored.
+# After editing, run: npm run transcode
+
+samples/sample-audio.ogg
