@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Adaptive Audio Streaming Demo</title>
+
+  <!-- hls.js for HLS playback -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+  <!-- dash.js for DASH playback -->
+  <script src="https://cdn.dashjs.org/latest/dash.all.min.js"></script>
+
+  <style>
+    :root {
+      --bg: #0d1117; --surface: #161b22; --border: #30363d;
+      --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+      --green: #3fb950; --yellow: #d29922; --red: #f85149;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg); color: var(--text); min-height: 100vh;
+      display: flex; justify-content: center; padding: 2rem 1rem;
+    }
+    .container { max-width: 720px; width: 100%; }
+
+    h1 { font-size: 1.6rem; margin-bottom: .25rem; }
+    .subtitle { color: var(--muted); margin-bottom: 1.5rem; font-size: .9rem; }
+
+    /* Protocol tabs */
+    .tabs { display: flex; gap: .5rem; margin-bottom: 1rem; }
+    .tab {
+      padding: .5rem 1.2rem; border-radius: 6px; border: 1px solid var(--border);
+      background: var(--surface); color: var(--muted); cursor: pointer;
+      font-size: .85rem; transition: all .15s;
+    }
+    .tab:hover { border-color: var(--accent); color: var(--text); }
+    .tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+    /* Player card */
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem;
+    }
+    audio { width: 100%; margin-bottom: 1rem; border-radius: 4px; }
+
+    /* Stats panel */
+    .stats { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+    .stat-box {
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; padding: .75rem;
+    }
+    .stat-label { font-size: .7rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+    .stat-value { font-size: 1.1rem; font-weight: 600; margin-top: .15rem; }
+
+    /* Event log */
+    .log-title { font-size: .85rem; color: var(--muted); margin-bottom: .5rem; }
+    .log {
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; padding: .75rem; max-height: 220px;
+      overflow-y: auto; font-family: 'SF Mono', SFMono-Regular, monospace;
+      font-size: .75rem; line-height: 1.6;
+    }
+    .log-entry { border-bottom: 1px solid var(--border); padding: .2rem 0; }
+    .log-entry:last-child { border-bottom: none; }
+    .log-time { color: var(--muted); }
+    .log-event { color: var(--accent); }
+    .log-detail { color: var(--text); }
+    .badge {
+      display: inline-block; padding: .1rem .4rem; border-radius: 3px;
+      font-size: .7rem; font-weight: 600;
+    }
+    .badge-low  { background: #f8514933; color: var(--red); }
+    .badge-mid  { background: #d2992233; color: var(--yellow); }
+    .badge-high { background: #3fb95033; color: var(--green); }
+
+    /* Track selector */
+    .track-selector { margin-bottom: 1rem; }
+    .track-selector label { font-size: .85rem; color: var(--muted); margin-right: .5rem; }
+    .track-selector select {
+      background: var(--surface); color: var(--text); border: 1px solid var(--border);
+      border-radius: 6px; padding: .4rem .8rem; font-size: .85rem; cursor: pointer;
+    }
+    .track-selector select:focus { outline: none; border-color: var(--accent); }
+    .empty-state {
+      text-align: center; padding: 3rem 1rem; color: var(--muted);
+    }
+    .empty-state code { display: block; margin-top: .5rem; color: var(--accent); font-size: .9rem; }
+
+    /* How it works */
+    .info-section { margin-top: 1.5rem; }
+    .info-section h2 { font-size: 1rem; margin-bottom: .5rem; }
+    .info-section p, .info-section li { font-size: .85rem; color: var(--muted); line-height: 1.6; }
+    .info-section ul { padding-left: 1.2rem; }
+    .info-section code {
+      background: var(--bg); padding: .1rem .3rem; border-radius: 3px;
+      font-size: .8rem; color: var(--accent);
+    }
+    .diagram {
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; padding: 1rem; margin: .75rem 0;
+      font-family: monospace; font-size: .75rem; color: var(--muted);
+      white-space: pre; overflow-x: auto; line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>🎵 Adaptive Audio Streaming</h1>
+  <p class="subtitle">HLS &amp; DASH side-by-side — watch the bitrate switch in real time</p>
+
+  <!-- Track selector -->
+  <div class="track-selector" id="track-selector-container" style="display:none">
+    <label for="track-select">Track:</label>
+    <select id="track-select"></select>
+  </div>
+
+  <!-- Empty state -->
+  <div class="empty-state" id="empty-state" style="display:none">
+    <p>No tracks found. Add audio file paths to <strong>audio-sources.txt</strong> and run:</p>
+    <code>npm run transcode</code>
+  </div>
+
+  <!-- Protocol selector -->
+  <div class="tabs">
+    <div class="tab active" data-proto="hls">HLS</div>
+    <div class="tab" data-proto="dash">DASH</div>
+  </div>
+
+  <!-- Player -->
+  <div class="card">
+    <audio id="player" controls></audio>
+
+    <div class="stats">
+      <div class="stat-box">
+        <div class="stat-label">Protocol</div>
+        <div class="stat-value" id="stat-proto">HLS</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">Current Bitrate</div>
+        <div class="stat-value" id="stat-bitrate">—</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">Quality Level</div>
+        <div class="stat-value" id="stat-level">—</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">Buffer Length</div>
+        <div class="stat-value" id="stat-buffer">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Event log -->
+  <div class="card">
+    <div class="log-title">📊 Adaptive Bitrate Events</div>
+    <div class="log" id="log"></div>
+  </div>
+
+  <!-- How It Works -->
+  <div class="info-section">
+    <h2>How Adaptive Streaming Works</h2>
+    <div class="diagram">
+┌──────────┐    transcode     ┌────────────────────────────────┐
+│ OGG File │ ──────────────▶  │  Multiple Bitrate Variants     │
+└──────────┘   (ffmpeg)       │  64k  │  128k  │  256k         │
+                              └───┬───┴────┬───┴────┬──────────┘
+                                  │        │        │
+                              ┌───▼────────▼────────▼──────────┐
+                              │  Segmenter (4-second chunks)   │
+                              └───┬────────┬────────┬──────────┘
+                                  │        │        │
+                     ┌────────────▼────────▼────────▼──────────┐
+                     │         HTTP Server (Express)           │
+                     │  Serves manifests + segments on demand  │
+                     └────────────────┬────────────────────────┘
+                                      │
+                     ┌────────────────▼────────────────────────┐
+                     │         Browser Player (hls.js/dash.js) │
+                     │  • Fetches manifest                     │
+                     │  • Monitors bandwidth + buffer          │
+                     │  • Switches quality automatically       │
+                     └─────────────────────────────────────────┘</div>
+    <ul>
+      <li>The source audio is encoded at <strong>3 quality tiers</strong>: 64 kbps (low), 128 kbps (mid), 256 kbps (high).</li>
+      <li>Each tier is split into <strong>4-second segments</strong> so the player can switch quality at segment boundaries.</li>
+      <li><strong>HLS</strong> uses <code>.m3u8</code> playlists and <code>.ts</code> segments. A master playlist lists all variants.</li>
+      <li><strong>DASH</strong> uses an <code>.mpd</code> XML manifest and <code>.m4s</code> segments with adaptation sets.</li>
+      <li>The player's <strong>ABR algorithm</strong> measures download speed and buffer fullness, then picks the highest quality that won't cause buffering.</li>
+      <li>Quality switches happen <strong>seamlessly at segment boundaries</strong> — no interruption to playback.</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+const audio    = document.getElementById('player');
+const logEl    = document.getElementById('log');
+const statProto  = document.getElementById('stat-proto');
+const statBitrate = document.getElementById('stat-bitrate');
+const statLevel   = document.getElementById('stat-level');
+const statBuffer  = document.getElementById('stat-buffer');
+const trackSelect = document.getElementById('track-select');
+const trackContainer = document.getElementById('track-selector-container');
+const emptyState = document.getElementById('empty-state');
+const playerContent = document.querySelectorAll('.card, .tabs, .info-section');
+
+let hls = null;
+let dashPlayer = null;
+let currentProto = 'hls';
+let tracks = [];
+let currentTrack = null;
+
+// ── Logging ──────────────────────────────────────────────────────────────
+function log(event, detail) {
+  const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  entry.innerHTML = `<span class="log-time">${time}</span> <span class="log-event">[${event}]</span> <span class="log-detail">${detail}</span>`;
+  logEl.prepend(entry);
+  // Keep log manageable
+  while (logEl.children.length > 100) logEl.removeChild(logEl.lastChild);
+}
+
+function bitrateLabel(bps) {
+  const kbps = Math.round(bps / 1000);
+  let tier = 'low';
+  if (kbps >= 200) tier = 'high';
+  else if (kbps >= 100) tier = 'mid';
+  return `<span class="badge badge-${tier}">${kbps} kbps</span>`;
+}
+
+// ── Buffer monitor ───────────────────────────────────────────────────────
+setInterval(() => {
+  if (audio.buffered.length > 0) {
+    const buf = (audio.buffered.end(audio.buffered.length - 1) - audio.currentTime).toFixed(1);
+    statBuffer.textContent = `${buf}s`;
+  }
+}, 500);
+
+// ── HLS ──────────────────────────────────────────────────────────────────
+function initHLS() {
+  destroyPlayers();
+  if (!currentTrack || !currentTrack.hls) return;
+  statProto.textContent = 'HLS';
+  statBitrate.innerHTML = '—';
+  statLevel.textContent = '—';
+
+  if (Hls.isSupported()) {
+    hls = new Hls({
+      debug: false,
+      enableWorker: true,
+      abrBandWidthFactor: 0.7,
+      abrBandWidthUpFactor: 0.5,
+    });
+
+    hls.loadSource(currentTrack.hls);
+    hls.attachMedia(audio);
+
+    hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
+      log('HLS', `Manifest loaded — ${data.levels.length} quality levels`);
+      data.levels.forEach((l, i) => {
+        log('HLS', `Level ${i}: ${Math.round(l.bitrate / 1000)} kbps, ${l.audioCodec || 'aac'}`);
+      });
+    });
+
+    hls.on(Hls.Events.LEVEL_SWITCHED, (_, data) => {
+      const level = hls.levels[data.level];
+      const kbps = Math.round(level.bitrate / 1000);
+      statBitrate.innerHTML = bitrateLabel(level.bitrate);
+      statLevel.textContent = `${data.level} of ${hls.levels.length - 1}`;
+      log('SWITCH', `Quality → Level ${data.level} (${kbps} kbps)`);
+    });
+
+    hls.on(Hls.Events.FRAG_LOADED, (_, data) => {
+      const frag = data.frag;
+      log('SEGMENT', `Loaded seg #${frag.sn} (level ${frag.level}), ${(data.stats?.total / 1024).toFixed(1)} KB`);
+    });
+
+    hls.on(Hls.Events.ERROR, (_, data) => {
+      log('ERROR', `${data.type}: ${data.details}`);
+      if (data.fatal) {
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
+        else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
+      }
+    });
+  } else if (audio.canPlayType('application/vnd.apple.mpegurl')) {
+    // Safari native HLS
+    audio.src = currentTrack.hls;
+    log('HLS', 'Using native HLS (Safari)');
+  }
+}
+
+// ── DASH ─────────────────────────────────────────────────────────────────
+function initDASH() {
+  destroyPlayers();
+  if (!currentTrack || !currentTrack.dash) return;
+  statProto.textContent = 'DASH';
+  statBitrate.innerHTML = '—';
+  statLevel.textContent = '—';
+
+  dashPlayer = dashjs.MediaPlayer().create();
+  dashPlayer.initialize(audio, currentTrack.dash, false);
+
+  dashPlayer.on(dashjs.MediaPlayer.events.MANIFEST_LOADED, () => {
+    log('DASH', 'MPD manifest loaded');
+  });
+
+  dashPlayer.on(dashjs.MediaPlayer.events.QUALITY_CHANGE_RENDERED, (e) => {
+    if (e.mediaType === 'audio') {
+      const bitrateList = dashPlayer.getBitrateInfoListFor('audio');
+      const info = bitrateList[e.newQuality];
+      if (info) {
+        statBitrate.innerHTML = bitrateLabel(info.bitrate);
+        statLevel.textContent = `${e.newQuality} of ${bitrateList.length - 1}`;
+        log('SWITCH', `Quality → Level ${e.newQuality} (${Math.round(info.bitrate / 1000)} kbps)`);
+      }
+    }
+  });
+
+  dashPlayer.on(dashjs.MediaPlayer.events.FRAGMENT_LOADING_COMPLETED, (e) => {
+    if (e.request && e.request.mediaType === 'audio') {
+      const bytes = e.response ? e.response.byteLength : 0;
+      log('SEGMENT', `Loaded ${e.request.type} segment, ${(bytes / 1024).toFixed(1)} KB`);
+    }
+  });
+
+  dashPlayer.on(dashjs.MediaPlayer.events.ERROR, (e) => {
+    log('ERROR', JSON.stringify(e.error || e));
+  });
+}
+
+// ── Cleanup ──────────────────────────────────────────────────────────────
+function destroyPlayers() {
+  if (hls) { hls.destroy(); hls = null; }
+  if (dashPlayer) { dashPlayer.reset(); dashPlayer = null; }
+  audio.removeAttribute('src');
+  audio.load();
+  logEl.innerHTML = '';
+}
+
+// ── Tab switching ────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    currentProto = tab.dataset.proto;
+    if (currentProto === 'hls') initHLS();
+    else initDASH();
+  });
+});
+
+// ── Track switching ──────────────────────────────────────────────────────
+trackSelect.addEventListener('change', () => {
+  currentTrack = tracks.find(t => t.name === trackSelect.value) || null;
+  loadCurrentProtocol();
+});
+
+function loadCurrentProtocol() {
+  if (currentProto === 'hls') initHLS();
+  else initDASH();
+}
+
+// ── Boot ─────────────────────────────────────────────────────────────────
+async function boot() {
+  try {
+    const res = await fetch('/api/tracks');
+    tracks = await res.json();
+  } catch {
+    tracks = [];
+  }
+
+  if (tracks.length === 0) {
+    emptyState.style.display = 'block';
+    playerContent.forEach(el => el.style.display = 'none');
+    trackContainer.style.display = 'none';
+    return;
+  }
+
+  // Populate track selector
+  trackSelect.innerHTML = '';
+  tracks.forEach(t => {
+    const opt = document.createElement('option');
+    opt.value = t.name;
+    opt.textContent = t.name;
+    trackSelect.appendChild(opt);
+  });
+
+  trackContainer.style.display = 'block';
+  currentTrack = tracks[0];
+  loadCurrentProtocol();
+}
+
+boot();
+</script>
+</body>
+</html>
