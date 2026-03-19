@@ -16,11 +16,11 @@ Traditional audio download: one file, one quality, the whole thing must arrive b
 4. **Client-driven switching** — the player monitors network speed and buffer health, then picks the highest quality that won't cause buffering. It can switch quality at every segment boundary — seamlessly, mid-playback.
 
 ```
-                    ┌──────────────────────────────┐
-                    │     Source: sample-audio.ogg  │
-                    └──────────────┬───────────────┘
+                    ┌───────────────────────────────┐
+                    │    Source: sample-audio.ogg   │
+                    └──────────────┬────────────────┘
                                    │ ffmpeg transcode
-                    ┌──────────────▼───────────────┐
+                    ┌──────────────▼────────────────┐
                     │    3 Quality Variants         │
                     │  ┌──────┬───────┬──────────┐  │
                     │  │ 64k  │ 128k  │  256k    │  │
@@ -28,18 +28,18 @@ Traditional audio download: one file, one quality, the whole thing must arrive b
                     │  └──┬───┴───┬───┴────┬─────┘  │
                     └─────┼───────┼────────┼────────┘
                           │       │        │
-                    ┌─────▼───────▼────────▼────────┐
+                    ┌─────▼───────▼────────▼─────────┐
                     │   4-second audio segments      │
                     │   + manifest (m3u8 / mpd)      │
                     └──────────────┬─────────────────┘
                                    │ HTTP
-                    ┌──────────────▼─────────────────┐
-                    │   Browser Player               │
+                    ┌──────────────▼──────────────────┐
+                    │   Browser Player                │
                     │   • Fetches manifest            │
                     │   • Downloads segments          │
                     │   • ABR: measures bandwidth     │
                     │   • Switches quality on the fly │
-                    └────────────────────────────────┘
+                    └─────────────────────────────────┘
 ```
 
 ### HLS vs DASH
